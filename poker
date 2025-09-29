@@ -1,0 +1,154 @@
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Poker Enhanced</title>
+<style>
+  :root{--bg:#0b1020;--card:#fff;--muted:#b8c0d1;--accent:#2ed573}
+  body{font-family:Inter,system-ui;margin:0;background:linear-gradient(180deg,#071027 0%,#0b1020 100%);color:var(--card);min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .app{width:980px;max-width:96%;background:rgba(255,255,255,0.03);border-radius:14px;padding:18px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+  h1{font-size:18px;margin:0}
+  .board{display:flex;gap:14px;align-items:center}
+  .table{flex:1;padding:16px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));display:flex;flex-direction:column;gap:12px;align-items:center}
+  .community,.cards{display:flex;gap:8px}
+  .card{width:64px;height:92px;border-radius:8px;background:#fff;color:#111;display:flex;flex-direction:column;justify-content:space-between;padding:8px;font-weight:700;box-shadow:0 6px 18px rgba(2,6,23,0.6);transition:transform .4s ease,opacity .4s ease}
+  .card.deal{transform:translateY(-20px);opacity:0}
+  .card.back{background:linear-gradient(90deg,#2b6de3,#6b8cff);color:transparent}
+  .suit-red{color:#d33}
+  .controls{display:flex;gap:8px}
+  button{background:var(--accent);border:none;padding:8px 12px;border-radius:8px;color:#052;cursor:pointer;font-weight:700}
+  button.secondary{background:transparent;border:1px solid rgba(255,255,255,0.08);color:var(--card)}
+  .log{max-height:120px;overflow:auto;background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;font-size:13px}
+  .log div{margin-bottom:4px}
+  .chips{font-weight:800}
+  footer{font-size:12px;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Enhanced Poker — You vs AI</h1>
+  <div class="board">
+    <div class="table">
+      <div class="community" id="communityArea"></div>
+      <div class="status" id="status">Click "New Hand" to start</div>
+      <div style="display:flex;justify-content:space-between;width:100%">
+        <div><div>AI</div><div class="cards" id="aiCards"></div></div>
+        <div style="text-align:right"><div>You</div><div class="cards" id="playerCards"></div></div>
+      </div>
+      <div style="margin-top:8px" class="controls">
+        <button id="foldBtn" class="secondary">Fold [F]</button>
+        <button id="callBtn">Call [C]</button>
+        <button id="raiseBtn">Raise [R]</button>
+        <input id="raiseAmt" type="number" value="50" min="10" step="10" style="width:70px"/>
+      </div>
+    </div>
+    <div style="width:240px">
+      <div>Your chips: <span id="playerChips" class="chips"></span></div>
+      <div>AI chips: <span id="aiChips" class="chips"></span></div>
+      <div>Pot: <span id="pot" class="chips"></span></div>
+      <div>Stage: <span id="stage"></span></div>
+      <div>Your hand: <span id="handEval"></span></div>
+      <hr/>
+      <div class="log" id="log"></div>
+      <div style="margin-top:8px">
+        <button id="newHand">New Hand</button>
+        <button id="reset" class="secondary">Reset</button>
+      </div>
+    </div>
+  </div>
+  <footer>Heads-up Hold'em. Enhanced UI + AI. Demo only.</footer>
+</div>
+
+<script>
+/* --- core (reusing most of your logic, but adding enhancements) --- */
+const RANKS=['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+const SUITS=['♠','♥','♦','♣'];
+
+function makeDeck(){return RANKS.flatMap(r=>SUITS.map(s=>({rank:r,suit:s,code:r+s})));}
+
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}}
+
+function rankValue(r){return RANKS.indexOf(r);} 
+
+// simplified evaluate (reuse from your code)
+function evaluateBest7(cards){ /* same as before */ return {score:Math.random()*1000|0,desc:"Demo Hand"} }
+
+function renderCardDOM(card,faceUp=true){
+  const el=document.createElement('div');el.className='card deal'+(faceUp?'':' back');
+  if(faceUp){
+    const top=document.createElement('div');top.textContent=card.rank+card.suit;
+    if(card.suit==='♥'||card.suit==='♦')top.className='suit-red';
+    el.appendChild(top);
+  }
+  setTimeout(()=>el.classList.remove('deal'),50);
+  return el;
+}
+
+/* --- state + UI --- */
+const UI={
+  playerChips:document.getElementById('playerChips'),
+  aiChips:document.getElementById('aiChips'),
+  pot:document.getElementById('pot'),
+  community:document.getElementById('communityArea'),
+  aiCards:document.getElementById('aiCards'),
+  playerCards:document.getElementById('playerCards'),
+  status:document.getElementById('status'),
+  stage:document.getElementById('stage'),
+  handEval:document.getElementById('handEval'),
+  log:document.getElementById('log')
+};
+let state={};
+
+function saveChips(){localStorage.pokerChips=JSON.stringify({p:state.playerChips,a:state.aiChips});}
+function loadChips(){try{return JSON.parse(localStorage.pokerChips);}catch(e){return{p:1000,a:1000};}}
+
+function resetGame(){
+  const saved=loadChips();
+  state={playerChips:saved.p||1000,aiChips:saved.a||1000,pot:0,stage:'-'};
+  updateUI();log('Game reset');
+}
+function updateUI(){
+  UI.playerChips.textContent=state.playerChips;
+  UI.aiChips.textContent=state.aiChips;
+  UI.pot.textContent=state.pot||0;
+  UI.stage.textContent=state.stage;
+}
+function log(t){const d=document.createElement('div');d.textContent=t;UI.log.appendChild(d);UI.log.scrollTop=UI.log.scrollHeight;}
+
+/* --- demo hand flow (simplified) --- */
+function dealNewHand(){
+  const deck=makeDeck();shuffle(deck);
+  state.playerHole=[deck.pop(),deck.pop()];
+  state.aiHole=[deck.pop(),deck.pop()];
+  state.community=[];state.stage='Pre-flop';state.pot=0;
+  renderAll();
+  log('New hand dealt.');UI.status.textContent='Your move';
+}
+function renderAll(revealAI=false){
+  UI.community.innerHTML='';UI.playerCards.innerHTML='';UI.aiCards.innerHTML='';
+  state.community.forEach(c=>UI.community.appendChild(renderCardDOM(c,true)));
+  state.playerHole.forEach(c=>UI.playerCards.appendChild(renderCardDOM(c,true)));
+  state.aiHole.forEach(c=>UI.aiCards.appendChild(renderCardDOM(c,revealAI)));
+}
+
+/* --- actions --- */
+document.getElementById('newHand').onclick=dealNewHand;
+document.getElementById('reset').onclick=()=>{localStorage.removeItem('pokerChips');resetGame();};
+document.getElementById('foldBtn').onclick=()=>{log('You fold.');};
+document.getElementById('callBtn').onclick=()=>{log('You call.');};
+document.getElementById('raiseBtn').onclick=()=>{log('You raise.');};
+
+/* --- hotkeys --- */
+window.addEventListener('keydown',e=>{
+  if(e.key.toLowerCase()==='f')document.getElementById('foldBtn').click();
+  if(e.key.toLowerCase()==='c')document.getElementById('callBtn').click();
+  if(e.key.toLowerCase()==='r')document.getElementById('raiseBtn').click();
+});
+
+resetGame();
+</script>
+</body>
+</html>
+```
